@@ -10,3 +10,4 @@ dist
 .next
 website/src/pages/docs
 website/algolia-lockfile.json
+*.sw[a-z]

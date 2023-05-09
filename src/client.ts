@@ -20,6 +20,8 @@ import {
   parseMessage,
   stringifyMessage,
   SubscribePayload,
+  JSONParse,
+  JSONStringify,
   JSONMessageReviver,
   JSONMessageReplacer,
 } from './common';
@@ -412,6 +414,16 @@ export interface ClientOptions<
    */
   generateID?: (payload: SubscribePayload) => ID;
   /**
+   * An optional override for the JSON.parse function used to convert a
+   * JSON string to a javascript object.
+   */
+  jsonParse?: JSONParse;
+  /**
+   * An optional override for the JSON.stringify function used to convert a
+   * javascript object to a JSON string.
+   */
+  jsonStringify?: JSONStringify;
+  /**
    * An optional override for the JSON.parse function used to hydrate
    * incoming messages to this client. Useful for parsing custom datatypes
    * out of the incoming JSON.
@@ -505,6 +517,8 @@ export function createClient<
         return v.toString(16);
       });
     },
+    jsonParse: parse,
+    jsonStringify: stringify,
     jsonMessageReplacer: replacer,
     jsonMessageReviver: reviver,
   } = options;
@@ -689,6 +703,7 @@ export function createClient<
                         // payload is completely absent if not provided
                       },
                   replacer,
+                  stringify,
                 ),
               );
 
@@ -720,7 +735,7 @@ export function createClient<
           let acknowledged = false;
           socket.onmessage = ({ data }) => {
             try {
-              const message = parseMessage(data, reviver);
+              const message = parseMessage(data, reviver, parse);
               emitter.emit('message', message);
               if (message.type === 'ping' || message.type === 'pong') {
                 emitter.emit(message.type, true, message.payload); // received
@@ -928,6 +943,7 @@ export function createClient<
                   payload,
                 },
                 replacer,
+                stringify,
               ),
             );
 
@@ -941,6 +957,7 @@ export function createClient<
                       type: MessageType.Complete,
                     },
                     replacer,
+                    stringify,
                   ),
                 );
               locks--;

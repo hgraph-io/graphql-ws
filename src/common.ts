@@ -409,6 +409,9 @@ export function isMessage(val: unknown): val is Message {
   }
 }
 
+export type JSONParse = (text: string, reviver?: JSONMessageReviver) => any;
+export type JSONStringify = (value: any, replacer?: JSONMessageReplacer) => any;
+
 /**
  * Function for transforming values within a message during JSON parsing
  * The values are produced by parsing the incoming raw JSON.
@@ -428,9 +431,10 @@ export type JSONMessageReviver = (this: any, key: string, value: any) => any;
 export function parseMessage(
   data: unknown,
   reviver?: JSONMessageReviver,
+  parse: JSONParse = JSON.parse,
 ): Message {
   return validateMessage(
-    typeof data === 'string' ? JSON.parse(data, reviver) : data,
+    typeof data === 'string' ? parse(data, reviver) : data,
   );
 }
 
@@ -453,7 +457,8 @@ export type JSONMessageReplacer = (this: any, key: string, value: any) => any;
 export function stringifyMessage<T extends MessageType>(
   msg: Message<T>,
   replacer?: JSONMessageReplacer,
+  stringify: JSONStringify = JSON.stringify,
 ): string {
   validateMessage(msg);
-  return JSON.stringify(msg, replacer);
+  return stringify(msg, replacer);
 }
