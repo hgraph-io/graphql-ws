@@ -534,7 +534,7 @@ export function createClient<
   } else if (typeof global !== 'undefined') {
     ws =
       global.WebSocket ||
-      // @ts-expect-error: Support more browsers
+      // @_ts-expect-error: Support more browsers
       global.MozWebSocket;
   } else if (typeof window !== 'undefined') {
     ws =
