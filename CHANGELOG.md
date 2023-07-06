@@ -1,3 +1,25 @@
+# [5.14.0](https://github.com/enisdenjo/graphql-ws/compare/v5.13.1...v5.14.0) (2023-06-22)
+
+
+### Features
+
+* **client:** Async iterator for subscriptions ([#486](https://github.com/enisdenjo/graphql-ws/issues/486)) ([fb4b967](https://github.com/enisdenjo/graphql-ws/commit/fb4b9673ed6689dda230c9f9141750b2cb538cb8))
+
+## [5.13.1](https://github.com/enisdenjo/graphql-ws/compare/v5.13.0...v5.13.1) (2023-05-15)
+
+
+### Bug Fixes
+
+* Remove unnecessary bun-types directives ([e9a56f7](https://github.com/enisdenjo/graphql-ws/commit/e9a56f788177dde19ebf9d44d2fc8bbe20d2f6ac)), closes [#478](https://github.com/enisdenjo/graphql-ws/issues/478)
+
+# [5.13.0](https://github.com/enisdenjo/graphql-ws/compare/v5.12.1...v5.13.0) (2023-05-12)
+
+
+### Features
+
+* **server:** Use Bun ([#476](https://github.com/enisdenjo/graphql-ws/issues/476)) ([09c7893](https://github.com/enisdenjo/graphql-ws/commit/09c78936f956d7cc9476220fbf421e259e4e6f8e))
+* **server:** Use Deno ([#477](https://github.com/enisdenjo/graphql-ws/issues/477)) ([0ffd03b](https://github.com/enisdenjo/graphql-ws/commit/0ffd03bc0c0a3801d5f755df289b62fa3d616ea9))
+
 ## [5.12.1](https://github.com/enisdenjo/graphql-ws/compare/v5.12.0...v5.12.1) (2023-03-31)
 
 
