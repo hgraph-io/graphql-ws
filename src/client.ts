@@ -102,7 +102,7 @@ export type Event =
   | EventError;
 
 /** @category Client */
-export type EventConnectingListener = () => void;
+export type EventConnectingListener = (isRetry: boolean) => void;
 
 /**
  * The first argument is actually the `WebSocket`, but to avoid
@@ -126,6 +126,7 @@ export type EventOpenedListener = (socket: unknown) => void;
 export type EventConnectedListener = (
   socket: unknown,
   payload: ConnectionAckMessage['payload'],
+  wasRetry: boolean,
 ) => void;
 
 /**
@@ -179,20 +180,20 @@ export type EventErrorListener = (error: unknown) => void;
 export type EventListener<E extends Event> = E extends EventConnecting
   ? EventConnectingListener
   : E extends EventOpened
-  ? EventOpenedListener
-  : E extends EventConnected
-  ? EventConnectedListener
-  : E extends EventPing
-  ? EventPingListener
-  : E extends EventPong
-  ? EventPongListener
-  : E extends EventMessage
-  ? EventMessageListener
-  : E extends EventClosed
-  ? EventClosedListener
-  : E extends EventError
-  ? EventErrorListener
-  : never;
+    ? EventOpenedListener
+    : E extends EventConnected
+      ? EventConnectedListener
+      : E extends EventPing
+        ? EventPingListener
+        : E extends EventPong
+          ? EventPongListener
+          : E extends EventMessage
+            ? EventMessageListener
+            : E extends EventClosed
+              ? EventClosedListener
+              : E extends EventError
+                ? EventErrorListener
+                : never;
 
 /**
  * Configuration used for the GraphQL over WebSocket client.
@@ -265,7 +266,7 @@ export interface ClientOptions<
    */
   lazyCloseTimeout?: number;
   /**
-   * The timout between dispatched keep-alive messages, naimly server pings. Internally
+   * The timeout between dispatched keep-alive messages, namely server pings. Internally
    * dispatches the `PingMessage` type to the server and expects a `PongMessage` in response.
    * This helps with making sure that the connection with the server is alive and working.
    *
@@ -462,9 +463,9 @@ export interface Client extends Disposable {
   /**
    * Terminates the WebSocket abruptly and immediately.
    *
-   * A close event `4499: Terminated` is issued to the current WebSocket and an
-   * artificial `{ code: 4499, reason: 'Terminated', wasClean: false }` close-event-like
-   * object is immediately emitted without waiting for the one coming from `WebSocket.onclose`.
+   * A close event `4499: Terminated` is issued to the current WebSocket and a
+   * synthetic {@link TerminatedCloseEvent} is immediately emitted without waiting for
+   * the one coming from `WebSocket.onclose`.
    *
    * Terminating is not considered fatal and a connection retry will occur as expected.
    *
@@ -541,7 +542,7 @@ export function createClient<
   } else if (typeof global !== 'undefined') {
     ws =
       global.WebSocket ||
-      // @_ts-expect-error: Support more browsers
+      // @ts-expect-error: Support more browsers
       global.MozWebSocket;
   } else if (typeof window !== 'undefined') {
     ws =
@@ -651,7 +652,7 @@ export function createClient<
             retries++;
           }
 
-          emitter.emit('connecting');
+          emitter.emit('connecting', retrying);
           const socket = new WebSocketImpl(
             typeof url === 'function' ? await url() : url,
             GRAPHQL_TRANSPORT_WS_PROTOCOL,
@@ -677,7 +678,7 @@ export function createClient<
             clearTimeout(queuedPing);
             denied(errOrEvent);
 
-            if (isLikeCloseEvent(errOrEvent) && errOrEvent.code === 4499) {
+            if (errOrEvent instanceof TerminatedCloseEvent) {
               socket.close(4499, 'Terminated'); // close event is artificial and emitted manually, see `Client.terminate()` below
               socket.onerror = null;
               socket.onclose = null;
@@ -775,7 +776,7 @@ export function createClient<
                 );
               clearTimeout(connectionAckTimeout);
               acknowledged = true;
-              emitter.emit('connected', socket, message.payload); // connected = socket opened + acknowledged
+              emitter.emit('connected', socket, message.payload, retrying); // connected = socket opened + acknowledged
               retrying = false; // future lazy connects are not retries
               retries = 0; // reset the retries on connect
               connected([
@@ -898,112 +899,108 @@ export function createClient<
     })();
   }
 
+  function subscribe(payload: SubscribePayload, sink: Sink) {
+    const id = generateID(payload);
+
+    let done = false,
+      errored = false,
+      releaser = () => {
+        // for handling completions before connect
+        locks--;
+        done = true;
+      };
+
+    (async () => {
+      locks++;
+      for (;;) {
+        try {
+          const [socket, release, waitForReleaseOrThrowOnClose] =
+            await connect();
+
+          // if done while waiting for connect, release the connection lock right away
+          if (done) return release();
+
+          const unlisten = emitter.onMessage(id, (message) => {
+            switch (message.type) {
+              case MessageType.Next: {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any -- payload will fit type
+                sink.next(message.payload as any);
+                return;
+              }
+              case MessageType.Error: {
+                (errored = true), (done = true);
+                sink.error(message.payload);
+                releaser();
+                return;
+              }
+              case MessageType.Complete: {
+                done = true;
+                releaser(); // release completes the sink
+                return;
+              }
+            }
+          });
+
+          socket.send(
+            stringifyMessage<MessageType.Subscribe>(
+              {
+                id,
+                type: MessageType.Subscribe,
+                payload,
+              },
+              replacer,
+              stringify,
+            ),
+          );
+
+          releaser = () => {
+            if (!done && socket.readyState === WebSocketImpl.OPEN)
+              // if not completed already and socket is open, send complete message to server on release
+              socket.send(
+                stringifyMessage<MessageType.Complete>(
+                  {
+                    id,
+                    type: MessageType.Complete,
+                  },
+                  replacer,
+                  stringify,
+                ),
+              );
+            locks--;
+            done = true;
+            release();
+          };
+
+          // either the releaser will be called, connection completed and
+          // the promise resolved or the socket closed and the promise rejected.
+          // whatever happens though, we want to stop listening for messages
+          await waitForReleaseOrThrowOnClose.finally(unlisten);
+
+          return; // completed, shouldnt try again
+        } catch (errOrCloseEvent) {
+          if (!shouldRetryConnectOrThrow(errOrCloseEvent)) return;
+        }
+      }
+    })()
+      .then(() => {
+        // delivering either an error or a complete terminates the sequence
+        if (!errored) sink.complete();
+      }) // resolves on release or normal closure
+      .catch((err) => {
+        sink.error(err);
+      }); // rejects on close events and errors
+
+    return () => {
+      // dispose only of active subscriptions
+      if (!done) releaser();
+    };
+  }
+
   return {
     on: emitter.on,
-    subscribe(payload, sink) {
-      const id = generateID(payload);
-
-      let done = false,
-        errored = false,
-        releaser = () => {
-          // for handling completions before connect
-          locks--;
-          done = true;
-        };
-
-      (async () => {
-        locks++;
-        for (;;) {
-          try {
-            const [socket, release, waitForReleaseOrThrowOnClose] =
-              await connect();
-
-            // if done while waiting for connect, release the connection lock right away
-            if (done) return release();
-
-            const unlisten = emitter.onMessage(id, (message) => {
-              switch (message.type) {
-                case MessageType.Next: {
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- payload will fit type
-                  sink.next(message.payload as any);
-                  return;
-                }
-                case MessageType.Error: {
-                  (errored = true), (done = true);
-                  sink.error(message.payload);
-                  releaser();
-                  return;
-                }
-                case MessageType.Complete: {
-                  done = true;
-                  releaser(); // release completes the sink
-                  return;
-                }
-              }
-            });
-
-            socket.send(
-              stringifyMessage<MessageType.Subscribe>(
-                {
-                  id,
-                  type: MessageType.Subscribe,
-                  payload,
-                },
-                replacer,
-                stringify,
-              ),
-            );
-
-            releaser = () => {
-              if (!done && socket.readyState === WebSocketImpl.OPEN)
-                // if not completed already and socket is open, send complete message to server on release
-                socket.send(
-                  stringifyMessage<MessageType.Complete>(
-                    {
-                      id,
-                      type: MessageType.Complete,
-                    },
-                    replacer,
-                    stringify,
-                  ),
-                );
-              locks--;
-              done = true;
-              release();
-            };
-
-            // either the releaser will be called, connection completed and
-            // the promise resolved or the socket closed and the promise rejected.
-            // whatever happens though, we want to stop listening for messages
-            await waitForReleaseOrThrowOnClose.finally(unlisten);
-
-            return; // completed, shouldnt try again
-          } catch (errOrCloseEvent) {
-            if (!shouldRetryConnectOrThrow(errOrCloseEvent)) return;
-          }
-        }
-      })()
-        .then(() => {
-          // delivering either an error or a complete terminates the sequence
-          if (!errored) sink.complete();
-        }) // resolves on release or normal closure
-        .catch((err) => {
-          sink.error(err);
-        }); // rejects on close events and errors
-
-      return () => {
-        // dispose only of active subscriptions
-        if (!done) releaser();
-      };
-    },
+    subscribe,
     iterate(request) {
-      const pending: ExecutionResult<
-        // TODO: how to not use `any` and not have a redundant function signature?
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        any,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        any
-      >[] = [];
+      const pending: ExecutionResult<any, any>[] = [];
       const deferred = {
         done: false,
         error: null as unknown,
@@ -1011,9 +1008,10 @@ export function createClient<
           // noop
         },
       };
-      const dispose = this.subscribe(request, {
+      const dispose = subscribe(request, {
         next(val) {
-          pending.push(val);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- payload will fit type
+          pending.push(val as any);
           deferred.resolve();
         },
         error(err) {
@@ -1074,14 +1072,27 @@ export function createClient<
     terminate() {
       if (connecting) {
         // only if there is a connection
-        emitter.emit('closed', {
-          code: 4499,
-          reason: 'Terminated',
-          wasClean: false,
-        });
+        emitter.emit('closed', new TerminatedCloseEvent());
       }
     },
   };
+}
+
+/**
+ * A synthetic close event `4499: Terminated` is issued to the current to immediately
+ * close the connection without waiting for the one coming from `WebSocket.onclose`.
+ *
+ * Terminating is not considered fatal and a connection retry will occur as expected.
+ *
+ * Useful in cases where the WebSocket is stuck and not emitting any events;
+ * can happen on iOS Safari, see: https://github.com/enisdenjo/graphql-ws/discussions/290.
+ */
+export class TerminatedCloseEvent extends Error {
+  public name = 'TerminatedCloseEvent';
+  public message = '4499: Terminated';
+  public code = 4499;
+  public reason = 'Terminated';
+  public wasClean = false;
 }
 
 /** Minimal close event interface required by the lib for error and socket close handling. */
@@ -1105,7 +1116,7 @@ function isFatalInternalCloseCode(code: number): boolean {
       1005, // No Status Received
       1012, // Service Restart
       1013, // Try Again Later
-      1013, // Bad Gateway
+      1014, // Bad Gateway
     ].includes(code)
   )
     return false;

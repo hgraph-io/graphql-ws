@@ -1,3 +1,51 @@
+# [5.16.0](https://github.com/enisdenjo/graphql-ws/compare/v5.15.0...v5.16.0) (2024-03-27)
+
+
+### Bug Fixes
+
+* **server:** Return all subscriptions regardless of the return invocation order ([f442288](https://github.com/enisdenjo/graphql-ws/commit/f442288ad59be451bc0f23e615079ef57b8fc5d7))
+* **server:** should not send error messages if socket closes before onSubscribe hooks resolves ([db47a66](https://github.com/enisdenjo/graphql-ws/commit/db47a6665a376afd1b9872daf0f47509225dd288)), closes [#539](https://github.com/enisdenjo/graphql-ws/issues/539)
+
+
+### Features
+
+* **server:** Close code and reason are optional ([6ae6e6f](https://github.com/enisdenjo/graphql-ws/commit/6ae6e6f4e392975ad786cf61e4947fd57f5cf56c)), closes [#547](https://github.com/enisdenjo/graphql-ws/issues/547)
+
+# [5.15.0](https://github.com/enisdenjo/graphql-ws/compare/v5.14.3...v5.15.0) (2024-02-12)
+
+
+### Bug Fixes
+
+* **client:** Use `TerminatedCloseEvent` class extending an `Error` for rejecting promises when terminating ([74b4ceb](https://github.com/enisdenjo/graphql-ws/commit/74b4ceb944de1ab368dec9b742eb6c0107e35854)), closes [#531](https://github.com/enisdenjo/graphql-ws/issues/531)
+* **server:** Dispose of subscriptions on close even if added late to the subscriptions list ([#534](https://github.com/enisdenjo/graphql-ws/issues/534)) ([e45d6b1](https://github.com/enisdenjo/graphql-ws/commit/e45d6b1eb916ee8a8bece4f8648e181de9a54a32)), closes [#532](https://github.com/enisdenjo/graphql-ws/issues/532)
+
+
+### Features
+
+* **server:** Add is retry flag to connect events ([#507](https://github.com/enisdenjo/graphql-ws/issues/507)) ([9ad853f](https://github.com/enisdenjo/graphql-ws/commit/9ad853f70bd0fe2e20f89ec7b52927d9ed3c73ef))
+
+## [5.14.3](https://github.com/enisdenjo/graphql-ws/compare/v5.14.2...v5.14.3) (2023-12-20)
+
+
+### Bug Fixes
+
+* **client:** Use closures instead of bindings (with `this`) ([812129d](https://github.com/enisdenjo/graphql-ws/commit/812129dcd6454ac7850a14b300162977d82e9bf9))
+* remove package.json workspaces entry in release ([63a831e](https://github.com/enisdenjo/graphql-ws/commit/63a831ef11ae85d93547e7eefe8e0b3113814782)), closes [#524](https://github.com/enisdenjo/graphql-ws/issues/524)
+
+## [5.14.2](https://github.com/enisdenjo/graphql-ws/compare/v5.14.1...v5.14.2) (2023-10-23)
+
+
+### Bug Fixes
+
+* **client:** correct close code for Bad Gateway reason ([#512](https://github.com/enisdenjo/graphql-ws/issues/512)) ([0438650](https://github.com/enisdenjo/graphql-ws/commit/0438650b4953cda40edabdce2c4e85373c7b2f24))
+
+## [5.14.1](https://github.com/enisdenjo/graphql-ws/compare/v5.14.0...v5.14.1) (2023-09-28)
+
+
+### Bug Fixes
+
+* **server:** Acknowledge connection before notifying the client to avoid race conditions with slow sends ([#506](https://github.com/enisdenjo/graphql-ws/issues/506)) ([8cb82bd](https://github.com/enisdenjo/graphql-ws/commit/8cb82bdba59e5da0b09d03b55e84f8e14973efad)), closes [#501](https://github.com/enisdenjo/graphql-ws/issues/501)
+
 # [5.14.0](https://github.com/enisdenjo/graphql-ws/compare/v5.13.1...v5.14.0) (2023-06-22)
 
 

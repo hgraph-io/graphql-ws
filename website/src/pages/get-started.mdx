@@ -118,7 +118,7 @@ fastify.listen(4000, (err) => {
 #### With [Bun](https://bun.sh)
 
 ```ts
-import { makeHandler, handleProtocols } from 'graphql-ws/lib/use/lib/bun';
+import { makeHandler, handleProtocols } from 'graphql-ws/lib/use/bun';
 import { schema } from './previous-step';
 
 Bun.serve({
@@ -130,7 +130,7 @@ Bun.serve({
     if (req.headers.get('upgrade') != 'websocket') {
       return new Response('Upgrade Required', { status: 426 });
     }
-    if (handleProtocols(req.headers.get('sec-websocket-protocol') || '')) {
+    if (!handleProtocols(req.headers.get('sec-websocket-protocol') || '')) {
       return new Response('Bad Request', { status: 404 });
     }
     if (!server.upgrade(req)) {

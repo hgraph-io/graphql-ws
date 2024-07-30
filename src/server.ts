@@ -57,7 +57,7 @@ export type OperationResult =
 /**
  * A concrete GraphQL execution context value type.
  *
- * Mainly used because TypeScript collapes unions
+ * Mainly used because TypeScript collapses unions
  * with `any` or `unknown` to `any` or `unknown`. So,
  * we use a custom type to allow definitions such as
  * the `context` server option.
@@ -240,8 +240,8 @@ export interface ServerOptions<
    */
   onDisconnect?: (
     ctx: Context<P, E>,
-    code: number,
-    reason: string,
+    code?: number,
+    reason?: string,
   ) => Promise<void> | void;
   /**
    * Called when the socket closes for whatever reason, at any
@@ -253,14 +253,14 @@ export interface ServerOptions<
    * consider using the `onComplete` callback.
    *
    * In comparison to `onDisconnect`, this callback will ALWAYS
-   * be called, regardless if the user succesfully went through
+   * be called, regardless if the user successfully went through
    * the connection initialisation or not. `onConnect` might not
    * called before the `onClose`.
    */
   onClose?: (
     ctx: Context<P, E>,
-    code: number,
-    reason: string,
+    code?: number,
+    reason?: string,
   ) => Promise<void> | void;
   /**
    * The subscribe callback executed right after
@@ -301,7 +301,7 @@ export interface ServerOptions<
     | void;
   /**
    * Executed after the operation call resolves. For streaming
-   * operations, triggering this callback does not necessarely
+   * operations, triggering this callback does not necessarily
    * mean that there is already a result available - it means
    * that the subscription process for the stream has resolved
    * and that the client is now subscribed.
@@ -326,7 +326,7 @@ export interface ServerOptions<
     result: OperationResult,
   ) => Promise<OperationResult | void> | OperationResult | void;
   /**
-   * Executed after an error occured right before it
+   * Executed after an error occurred right before it
    * has been dispatched to the client.
    *
    * Use this callback to format the outgoing GraphQL
@@ -401,7 +401,7 @@ export interface ServerOptions<
 /** @category Server */
 export interface Server<E = undefined> {
   /**
-   * New socket has beeen established. The lib will validate
+   * New socket has been established. The lib will validate
    * the protocol and use the socket accordingly. Returned promise
    * will resolve after the socket closes.
    *
@@ -417,14 +417,14 @@ export interface Server<E = undefined> {
   opened(
     socket: WebSocket,
     ctxExtra: E,
-  ): (code: number, reason: string) => Promise<void>; // closed
+  ): (code?: number, reason?: string) => Promise<void>; // closed
 }
 
 /** @category Server */
 export interface WebSocket {
   /**
    * The subprotocol of the WebSocket. Will be used
-   * to validate agains the supported ones.
+   * to validate against the supported ones.
    */
   readonly protocol: string;
   /**
@@ -468,7 +468,7 @@ export interface WebSocket {
    * first argument.
    *
    * If this listener is implemented, the server will NOT automatically reply
-   * to any pings from the client. Implementing it makes it your resposibility
+   * to any pings from the client. Implementing it makes it your responsibility
    * to decide how and when to respond.
    */
   onPing?(payload: PingMessage['payload']): Promise<void> | void;
@@ -522,7 +522,7 @@ export interface Context<
 }
 
 /**
- * Makes a Protocol complient WebSocket GraphQL server. The server
+ * Makes a Protocol compliant WebSocket GraphQL server. The server
  * is actually an API which is to be used with your favourite WebSocket
  * server library!
  *
@@ -613,6 +613,11 @@ export function makeServer<
             if (permittedOrPayload === false)
               return socket.close(CloseCode.Forbidden, 'Forbidden');
 
+            // we should acknowledge before send to avoid race conditions (like those exampled in https://github.com/enisdenjo/graphql-ws/issues/501)
+            // even if the send fails/throws, the connection should be closed because its malfunctioning
+            // @ts-expect-error: I can write
+            ctx.acknowledged = true;
+
             await socket.send(
               stringifyMessage<MessageType.ConnectionAck>(
                 isObject(permittedOrPayload)
@@ -627,9 +632,6 @@ export function makeServer<
                 replacer,
               ),
             );
-
-            // @ts-expect-error: I can write
-            ctx.acknowledged = true;
             return;
           }
           case MessageType.Ping: {
@@ -728,7 +730,9 @@ export function makeServer<
               const maybeExecArgsOrErrors = await onSubscribe?.(ctx, message);
               if (maybeExecArgsOrErrors) {
                 if (areGraphQLErrors(maybeExecArgsOrErrors))
-                  return await emit.error(maybeExecArgsOrErrors);
+                  return id in ctx.subscriptions
+                    ? await emit.error(maybeExecArgsOrErrors)
+                    : void 0;
                 else if (Array.isArray(maybeExecArgsOrErrors))
                   throw new Error(
                     'Invalid return value from onSubscribe hook, expected an array of GraphQLError objects',
@@ -758,7 +762,9 @@ export function makeServer<
                   execArgs.document,
                 );
                 if (validationErrors.length > 0)
-                  return await emit.error(validationErrors);
+                  return id in ctx.subscriptions
+                    ? await emit.error(validationErrors)
+                    : void 0;
               }
 
               const operationAST = getOperationAST(
@@ -766,11 +772,13 @@ export function makeServer<
                 execArgs.operationName,
               );
               if (!operationAST)
-                return await emit.error([
-                  new GraphQLError('Unable to identify operation'),
-                ]);
+                return id in ctx.subscriptions
+                  ? await emit.error([
+                      new GraphQLError('Unable to identify operation'),
+                    ])
+                  : void 0;
 
-              // if `onSubscribe` didnt specify a rootValue, inject one
+              // if `onSubscribe` didn't specify a rootValue, inject one
               if (!('rootValue' in execArgs))
                 execArgs.rootValue = roots?.[operationAST.operation];
 
@@ -821,7 +829,7 @@ export function makeServer<
               }
 
               // lack of subscription at this point indicates that the client
-              // completed the subscription, he doesnt need to be reminded
+              // completed the subscription, he doesn't need to be reminded
               await emit.complete(id in ctx.subscriptions);
             } finally {
               // whatever happens to the subscription, we finally want to get rid of the reservation
@@ -846,9 +854,18 @@ export function makeServer<
       // wait for close, cleanup and the disconnect callback
       return async (code, reason) => {
         if (connectionInitWait) clearTimeout(connectionInitWait);
-        for (const sub of Object.values(ctx.subscriptions)) {
-          if (isAsyncGenerator(sub)) await sub.return(undefined);
-        }
+
+        const subs = { ...ctx.subscriptions };
+        // @ts-expect-error: I can write
+        ctx.subscriptions = {}; // deleting the subscription means no further activity should take place
+
+        // we return all iterable subscriptions immediatelly, independant of the order
+        await Promise.all(
+          Object.values(subs)
+            .filter(isAsyncGenerator)
+            .map((sub) => sub.return(undefined)),
+        );
+
         if (ctx.acknowledged) await onDisconnect?.(ctx, code, reason);
         await onClose?.(ctx, code, reason);
       };
